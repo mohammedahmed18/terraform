@@ -20,6 +20,13 @@ import (
 type ChangesSync struct {
 	lock    sync.Mutex
 	changes *Changes
+
+	// configResourceIndex provides O(1) lookup of resource instance changes
+	// by their config resource address, avoiding the O(N) linear scan that
+	// InstancesForConfigResource would otherwise perform on every call.
+	// This index is lazily built on first read and invalidated on writes
+	// that modify the Resources slice.
+	configResourceIndex map[string][]*ResourceInstanceChange
 }
 
 // AppendResourceInstanceChange records the given resource instance change in
@@ -37,6 +44,15 @@ func (cs *ChangesSync) AppendResourceInstanceChange(change *ResourceInstanceChan
 
 	s := change.DeepCopy()
 	cs.changes.Resources = append(cs.changes.Resources, s)
+
+	// Update the index if it exists; if it doesn't, it will be built
+	// lazily on the next read.
+	if cs.configResourceIndex != nil {
+		if s.DeposedKey == addrs.NotDeposed {
+			key := s.Addr.ContainingResource().Config().String()
+			cs.configResourceIndex[key] = append(cs.configResourceIndex[key], s)
+		}
+	}
 }
 
 func (cs *ChangesSync) AppendQueryInstance(query *QueryInstance) {
@@ -89,9 +105,25 @@ func (cs *ChangesSync) GetChangesForConfigResource(addr addrs.ConfigResource) []
 	}
 	cs.lock.Lock()
 	defer cs.lock.Unlock()
-	var changes []*ResourceInstanceChange
-	for _, c := range cs.changes.InstancesForConfigResource(addr) {
-		changes = append(changes, c.DeepCopy())
+
+	// Lazily build the index on first read.
+	if cs.configResourceIndex == nil {
+		cs.configResourceIndex = make(map[string][]*ResourceInstanceChange)
+		for _, rc := range cs.changes.Resources {
+			if rc.DeposedKey == addrs.NotDeposed {
+				key := rc.Addr.ContainingResource().Config().String()
+				cs.configResourceIndex[key] = append(cs.configResourceIndex[key], rc)
+			}
+		}
+	}
+
+	indexed := cs.configResourceIndex[addr.String()]
+	if len(indexed) == 0 {
+		return nil
+	}
+	changes := make([]*ResourceInstanceChange, len(indexed))
+	for i, c := range indexed {
+		changes[i] = c.DeepCopy()
 	}
 	return changes
 }
@@ -147,6 +179,8 @@ func (cs *ChangesSync) RemoveResourceInstanceChange(addr addrs.AbsResourceInstan
 		}
 		copy(cs.changes.Resources[i:], cs.changes.Resources[i+1:])
 		cs.changes.Resources = cs.changes.Resources[:len(cs.changes.Resources)-1]
+		// Invalidate the index since the slice changed.
+		cs.configResourceIndex = nil
 		return
 	}
 }
