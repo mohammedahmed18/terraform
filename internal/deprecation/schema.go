@@ -32,13 +32,6 @@ func MarkDeprecatedValues(val cty.Value, schema *configschema.Block, origin stri
 		return newVal
 	}
 
-	// Fast path: if no attributes or nested blocks in this schema are
-	// deprecated, skip the expensive cty.Transform deep walk entirely.
-	// This is the common case for most provider resources.
-	if !schemaHasDeprecations(schema) {
-		return newVal
-	}
-
 	// Even if the block itself is not deprecated, its attributes might be
 	// deprecated as well
 	if val.Type().IsObjectType() || val.Type().IsMapType() || val.Type().IsCollectionType() {
@@ -60,42 +53,6 @@ func MarkDeprecatedValues(val cty.Value, schema *configschema.Block, origin stri
 	}
 
 	return newVal
-}
-
-// schemaHasDeprecations returns true if any attribute or nested block in the
-// schema tree is marked as deprecated. This allows callers to skip expensive
-// deep value walks when no deprecations exist.
-func schemaHasDeprecations(schema *configschema.Block) bool {
-	for _, attr := range schema.Attributes {
-		if attr.Deprecated {
-			return true
-		}
-		if attr.NestedType != nil && objectHasDeprecations(attr.NestedType) {
-			return true
-		}
-	}
-	for _, bt := range schema.BlockTypes {
-		if bt.Deprecated {
-			return true
-		}
-		if schemaHasDeprecations(&bt.Block) {
-			return true
-		}
-	}
-	return false
-}
-
-// objectHasDeprecations checks a nested object type for deprecated attributes.
-func objectHasDeprecations(obj *configschema.Object) bool {
-	for _, attr := range obj.Attributes {
-		if attr.Deprecated {
-			return true
-		}
-		if attr.NestedType != nil && objectHasDeprecations(attr.NestedType) {
-			return true
-		}
-	}
-	return false
 }
 
 func schemaDeprecationMessage(schema *configschema.Block) string {
