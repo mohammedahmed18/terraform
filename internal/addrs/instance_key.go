@@ -5,7 +5,6 @@ package addrs
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"unicode"
 
@@ -84,7 +83,7 @@ func (k IntKey) instanceKeySigil() {
 }
 
 func (k IntKey) String() string {
-	return "[" + strconv.Itoa(int(k)) + "]"
+	return fmt.Sprintf("[%d]", int(k))
 }
 
 func (k IntKey) Value() cty.Value {
